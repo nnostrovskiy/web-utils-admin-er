@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Комбинированный скрипт: Установка даты ТОП и ограничение символов
 // @namespace    https://github.com/nnostrovskiy/web-utils-admin-er
-// @version      1.0.0
+// @version      1.0.1
 // @description  Автоматически устанавливает дату деактивации ТОП новости на неделю вперед и ограничивает ввод до 90 символов в поле "Заголовок для топ новости" с отображением счетчика. Улучшенная версия с обработкой ошибок и оптимизацией производительности.
 // @author       Островский Николай Николаевич, Запорожское региональное отделение Партии «Единая Россия»
 // @match        https://admin.er.ru/admin/news/create
@@ -32,26 +32,31 @@
         dateOffsetDays: 7,
         maxTitleLength: 90,
         visualStyles: {
+            // Основная синяя цветовая схема
+            primaryBlue: '#3b82f6',
+            primaryBlueDark: '#1d4ed8',
+            primaryBlueLight: '#60a5fa',
+            blueBackground: '#f0f9ff',
+            blueFocusBackground: '#e1f5fe',
+            blueBorder: '#3b82f6',
+            blueFocusBorder: '#0288d1',
+            
             // Стили для системы дат
             successBackground: '#d4edda',
             successBorder: '#28a745',
-            inputBackground: '#f0f9ff',
-            inputBorder: '#3b82f6',
-            focusBackground: '#e1f5fe',
-            focusBorder: '#0288d1',
             indicatorGradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
             successStateBackground: '#ecfdf5',
             successStateBorder: '#10b981',
             
-            // Стили для счетчика символов
-            counterNormal: '#4caf50',
-            counterWarning: '#ff9800',
-            counterExceeded: '#ff0000',
-            inputFocusBorder: '#4caf50',
-            inputFocusShadow: 'rgba(76, 175, 80, 0.3)',
-            warningBorder: '#ff9800',
-            exceededBorder: '#ff0000',
-            exceededBackground: '#ffe6e6'
+            // Стили для счетчика символов (синяя схема)
+            counterNormal: '#3b82f6', // Синий вместо зеленого
+            counterWarning: '#f59e0b', // Оранжевый
+            counterExceeded: '#ef4444', // Красный
+            inputFocusBorder: '#3b82f6', // Синий
+            inputFocusShadow: 'rgba(59, 130, 246, 0.3)', // Синяя тень
+            warningBorder: '#f59e0b', // Оранжевый
+            exceededBorder: '#ef4444', // Красный
+            exceededBackground: '#fef2f2' // Светло-красный
         }
     };
 
@@ -219,8 +224,9 @@
                 `Доступна версия: ${latestVersion}\n\n` +
                 `Что нового:\n` +
                 `• Объединены функции установки даты и ограничения символов\n` +
-                `• Улучшена стабильность работы\n` +
-                `• Оптимизирована производительность`;
+                `• Синяя цветовая схема для счетчика символов\n` +
+                `• Мгновенное обновление счетчика в реальном времени\n` +
+                `• Улучшена стабильность работы`;
             
             if (typeof GM_notification === 'function') {
                 GM_notification({
@@ -343,7 +349,7 @@
         }, 'setTopEndDate', false);
     }
 
-    // ===== СИСТЕМА ОГРАНИЧЕНИЯ СИМВОЛОВ =====
+    // ===== СИСТЕМА ОГРАНИЧЕНИЯ СИМВОЛОВ (ОБНОВЛЕННАЯ) =====
     function setupCharCounter() {
         return safeExecute(() => {
             const titleTopInput = document.querySelector('input[name="title_top"]');
@@ -360,7 +366,7 @@
                 return true;
             }
 
-            // Создаем элемент счетчика
+            // Создаем элемент счетчика с синей темой
             const counter = document.createElement('div');
             counter.className = 'char-counter';
             counter.style.cssText = `
@@ -370,17 +376,19 @@
                 margin-top: 5px;
                 margin-bottom: 10px;
                 font-weight: bold;
-                transition: color 0.3s ease;
+                transition: color 0.2s ease;
+                font-family: inherit;
             `;
 
             // Вставляем счетчик после поля ввода
             titleTopInput.parentNode.insertBefore(counter, titleTopInput.nextSibling);
 
-            // Функция обновления счетчика
+            // Функция мгновенного обновления счетчика
             function updateCounter() {
                 const currentLength = titleTopInput.value.length;
                 const remaining = CONFIG.maxTitleLength - currentLength;
 
+                // Мгновенное обновление без задержек
                 if (remaining < 0) {
                     // Превышение лимита
                     counter.style.color = CONFIG.visualStyles.counterExceeded;
@@ -388,13 +396,13 @@
                     
                     // Визуальное оформление поля при превышении
                     titleTopInput.classList.add('char-limit-exceeded');
-                    titleTopInput.classList.remove('char-limit-warning');
+                    titleTopInput.classList.remove('char-limit-warning', 'char-limit-normal');
                     
                     // Обрезаем текст если превышен лимит
                     if (currentLength > CONFIG.maxTitleLength) {
                         titleTopInput.value = titleTopInput.value.substring(0, CONFIG.maxTitleLength);
-                        // Рекурсивно вызываем для обновления счетчика
-                        setTimeout(updateCounter, 0);
+                        // Немедленно обновляем счетчик с новым значением
+                        requestAnimationFrame(updateCounter);
                     }
                 } else if (remaining <= 10) {
                     // Предупреждение (осталось 10 символов или меньше)
@@ -402,12 +410,13 @@
                     counter.textContent = `Осталось символов: ${remaining}/${CONFIG.maxTitleLength}`;
                     
                     titleTopInput.classList.add('char-limit-warning');
-                    titleTopInput.classList.remove('char-limit-exceeded');
+                    titleTopInput.classList.remove('char-limit-exceeded', 'char-limit-normal');
                 } else {
-                    // Нормальное состояние
+                    // Нормальное состояние (синий цвет)
                     counter.style.color = CONFIG.visualStyles.counterNormal;
                     counter.textContent = `Осталось символов: ${remaining}/${CONFIG.maxTitleLength}`;
                     
+                    titleTopInput.classList.add('char-limit-normal');
                     titleTopInput.classList.remove('char-limit-warning', 'char-limit-exceeded');
                 }
             }
@@ -415,26 +424,31 @@
             // Устанавливаем атрибут maxlength
             titleTopInput.setAttribute('maxlength', CONFIG.maxTitleLength);
 
-            // Добавляем обработчики событий
-            const debouncedUpdate = debounce(updateCounter, 100);
-            
-            const events = ['input', 'change', 'keyup', 'focus', 'blur'];
+            // Добавляем обработчики событий для мгновенного обновления
+            const events = ['input', 'change', 'keydown', 'keyup', 'focus', 'blur', 'cut', 'copy'];
             events.forEach(eventType => {
-                titleTopInput.addEventListener(eventType, debouncedUpdate, {
+                titleTopInput.addEventListener(eventType, updateCounter, {
                     passive: true,
                     capture: false
                 });
             });
 
+            // Особенная обработка для paste события
             titleTopInput.addEventListener('paste', function(e) {
-                setTimeout(debouncedUpdate, 10);
+                // Даем браузеру обработать вставку, затем сразу обновляем
+                setTimeout(updateCounter, 0);
             });
 
-            // Наблюдаем за изменениями значения
+            // Обработчик для drag and drop
+            titleTopInput.addEventListener('drop', function(e) {
+                setTimeout(updateCounter, 0);
+            });
+
+            // Наблюдаем за программными изменениями значения
             const observer = new MutationObserver(function(mutations) {
                 mutations.forEach(function(mutation) {
                     if (mutation.type === 'attributes' && mutation.attributeName === 'value') {
-                        debouncedUpdate();
+                        updateCounter();
                     }
                 });
             });
@@ -448,15 +462,47 @@
             window._topNewsObservers = window._topNewsObservers || [];
             window._topNewsObservers.push(observer);
 
-            // Инициализируем счетчик
+            // Инициализируем счетчик сразу
             updateCounter();
 
-            logger.info('✅ Ограничитель символов настроен');
+            // Добавляем индикатор для поля заголовка (аналогично полю даты)
+            const addTitleIndicator = () => {
+                if (!titleTopInput.parentNode.querySelector('.title-top-indicator')) {
+                    const indicator = document.createElement('div');
+                    indicator.className = 'title-top-indicator';
+                    indicator.textContent = '90 max';
+                    indicator.title = 'Ограничение 90 символов';
+                    indicator.style.cssText = `
+                        position: absolute;
+                        right: 8px;
+                        top: 50%;
+                        transform: translateY(-50%);
+                        background: ${CONFIG.visualStyles.indicatorGradient};
+                        color: white;
+                        padding: 3px 8px;
+                        border-radius: 4px;
+                        font-size: 11px;
+                        font-weight: bold;
+                        pointer-events: none;
+                        z-index: 1000;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    `;
+                    
+                    titleTopInput.parentNode.style.position = 'relative';
+                    titleTopInput.parentNode.appendChild(indicator);
+                    
+                    logger.log('✅ Индикатор для поля заголовка добавлен');
+                }
+            };
+
+            setTimeout(addTitleIndicator, 500);
+
+            logger.info('✅ Ограничитель символов настроен с мгновенным обновлением');
             return true;
         }, 'setupCharCounter', false);
     }
 
-    // ===== ВИЗУАЛЬНЫЕ ИНДИКАТОРЫ И СТИЛИ =====
+    // ===== ВИЗУАЛЬНЫЕ ИНДИКАТОРЫ И СТИЛИ (ОБНОВЛЕННЫЕ) =====
     function showSuccessIndicator() {
         safeExecute(() => {
             const topEndInput = document.querySelector('input[name="top_end_date"]');
@@ -478,18 +524,18 @@
             const style = document.createElement('style');
             style.id = 'top-news-combined-styles';
             
-            // Сохранение всех оригинальных CSS стилей и цветов для обеих систем
+            // Обновленные стили с синей цветовой схемой
             style.textContent = `
                 /* Стили для системы установки даты */
                 input[name="top_end_date"] {
-                    background-color: ${CONFIG.visualStyles.inputBackground} !important;
-                    border: 2px solid ${CONFIG.visualStyles.inputBorder} !important;
+                    background-color: ${CONFIG.visualStyles.blueBackground} !important;
+                    border: 2px solid ${CONFIG.visualStyles.blueBorder} !important;
                     position: relative;
                     transition: all 0.3s ease;
                 }
                 input[name="top_end_date"]:focus {
-                    background-color: ${CONFIG.visualStyles.focusBackground} !important;
-                    border-color: ${CONFIG.visualStyles.focusBorder} !important;
+                    background-color: ${CONFIG.visualStyles.blueFocusBackground} !important;
+                    border-color: ${CONFIG.visualStyles.blueFocusBorder} !important;
                 }
                 .auto-date-indicator {
                     position: absolute;
@@ -511,21 +557,35 @@
                     background-color: ${CONFIG.visualStyles.successStateBackground} !important;
                 }
 
-                /* Стили для системы ограничения символов */
+                /* Стили для системы ограничения символов (синяя тема) */
                 input[name="title_top"] {
                     border-width: 2px !important;
-                    transition: border-color 0.3s ease, background-color 0.3s ease !important;
+                    border-color: ${CONFIG.visualStyles.blueBorder} !important;
+                    background-color: ${CONFIG.visualStyles.blueBackground} !important;
+                    transition: all 0.2s ease !important;
+                    position: relative;
                 }
                 input[name="title_top"]:focus {
-                    border-color: ${CONFIG.visualStyles.inputFocusBorder} !important;
+                    border-color: ${CONFIG.visualStyles.blueFocusBorder} !important;
+                    background-color: ${CONFIG.visualStyles.blueFocusBackground} !important;
                     box-shadow: 0 0 5px ${CONFIG.visualStyles.inputFocusShadow} !important;
+                }
+                .char-limit-normal {
+                    border-color: ${CONFIG.visualStyles.blueBorder} !important;
+                    background-color: ${CONFIG.visualStyles.blueBackground} !important;
                 }
                 .char-limit-warning {
                     border-color: ${CONFIG.visualStyles.warningBorder} !important;
+                    background-color: #fffbeb !important;
                 }
                 .char-limit-exceeded {
                     border-color: ${CONFIG.visualStyles.exceededBorder} !important;
                     background-color: ${CONFIG.visualStyles.exceededBackground} !important;
+                }
+
+                /* Анимация для плавного изменения цвета счетчика */
+                .char-counter {
+                    transition: color 0.2s ease !important;
                 }
             `;
             
@@ -551,7 +611,37 @@
 
             setTimeout(addDateIndicator, 500);
             
-            const indicatorObserver = new MutationObserver(addDateIndicator);
+            const indicatorObserver = new MutationObserver(function(mutations) {
+                addDateIndicator();
+                
+                // Также проверяем поле заголовка
+                const titleInput = document.querySelector('input[name="title_top"]');
+                if (titleInput && !titleInput.parentNode.querySelector('.title-top-indicator')) {
+                    const titleIndicator = document.createElement('div');
+                    titleIndicator.className = 'title-top-indicator';
+                    titleIndicator.textContent = '90 max';
+                    titleIndicator.title = 'Ограничение 90 символов';
+                    titleIndicator.style.cssText = `
+                        position: absolute;
+                        right: 8px;
+                        top: 50%;
+                        transform: translateY(-50%);
+                        background: ${CONFIG.visualStyles.indicatorGradient};
+                        color: white;
+                        padding: 3px 8px;
+                        border-radius: 4px;
+                        font-size: 11px;
+                        font-weight: bold;
+                        pointer-events: none;
+                        z-index: 1000;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    `;
+                    
+                    titleInput.parentNode.style.position = 'relative';
+                    titleInput.parentNode.appendChild(titleIndicator);
+                }
+            });
+
             indicatorObserver.observe(document.body, {
                 childList: true,
                 subtree: true
@@ -686,15 +776,15 @@
         }
         
         // Удаление визуальных индикаторов
-        const indicators = document.querySelectorAll('.auto-date-indicator, .char-counter');
+        const indicators = document.querySelectorAll('.auto-date-indicator, .char-counter, .title-top-indicator');
         indicators.forEach(indicator => {
             safeExecute(() => indicator.remove(), 'Удаление индикатора');
         });
         
         // Сброс классов стилей
-        const styledInputs = document.querySelectorAll('.auto-date-success, .char-limit-warning, .char-limit-exceeded');
+        const styledInputs = document.querySelectorAll('.auto-date-success, .char-limit-warning, .char-limit-exceeded, .char-limit-normal');
         styledInputs.forEach(input => {
-            input.classList.remove('auto-date-success', 'char-limit-warning', 'char-limit-exceeded');
+            input.classList.remove('auto-date-success', 'char-limit-warning', 'char-limit-exceeded', 'char-limit-normal');
         });
         
         logger.log('✅ Очистка завершена');
