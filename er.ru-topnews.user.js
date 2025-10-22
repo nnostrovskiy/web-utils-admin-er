@@ -1,17 +1,12 @@
 // ==UserScript==
-// @name         Автоматическая установка даты ТОП новости (Оптимизированная)
-// @namespace    https://github.com/nnostrovskiy/web-utils-admin-er
+// @name         Улучшенный переключатель активности новости
+// @namespace    http://tampermonkey.net/
 // @version      1.0.0
-// @description  Автоматически устанавливает дату деактивации ТОП новости на неделю вперед. Улучшенная версия с обработкой ошибок и оптимизацией производительности.
+// @description  Делает переключатель активности новости более понятным с пояснениями и улучшенной визуализацией
 // @author       Островский Николай Николаевич, Запорожское региональное отделение Партии «Единая Россия»
 // @match        https://admin.er.ru/admin/news/create
 // @match        https://admin.er.ru/admin/news/*/edit
-// @grant        GM_xmlhttpRequest
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_notification
-// @grant        GM_log
-// @grant        GM_unload
+// @grant        none
 // @run-at       document-end
 // @updateURL    https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/main/er.ru-topnews.user.js
 // @downloadURL  https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/main/er.ru-topnews.user.js
@@ -24,41 +19,54 @@
     const CONFIG = {
         debugMode: true,
         maxWaitTime: 15000,
-        pollInterval: 500,
-        updateCheckInterval: 86400000, // 24 часа в миллисекундах
-        githubRawUrl: 'https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/main/er.ru-topnews.user.js',
-        lastCheckKey: 'lastUpdateCheck_v3',
-        ignoreUpdateKey: 'ignoreUpdateVersion_v3',
-        dateOffsetDays: 7,
+        checkInterval: 500,
+        toggleSelector: 'input[name="active"][class*="toggleswitch"]',
         visualStyles: {
+            // 🎨 ЦВЕТОВАЯ СХЕМА ИЗ ПРИМЕРА
+            primaryBlue: '#3b82f6',
+            primaryBlueDark: '#1d4ed8',
+            primaryBlueLight: '#60a5fa',
+            blueBackground: '#f0f9ff',
+            blueFocusBackground: '#e1f5fe',
+            blueBorder: '#3b82f6',
+            blueFocusBorder: '#0288d1',
             successBackground: '#d4edda',
             successBorder: '#28a745',
-            inputBackground: '#f0f9ff',
-            inputBorder: '#3b82f6',
-            focusBackground: '#e1f5fe',
-            focusBorder: '#0288d1',
             indicatorGradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
             successStateBackground: '#ecfdf5',
-            successStateBorder: '#10b981'
+            successStateBorder: '#10b981',
+            // 🎨 ЦВЕТА СЧЕТЧИКА СИМВОЛОВ
+            counterNormal: '#3b82f6',
+            counterWarning: '#f59e0b',
+            counterExceeded: '#ef4444',
+            inputFocusBorder: '#3b82f6',
+            inputFocusShadow: 'rgba(59, 130, 246, 0.3)',
+            warningBorder: '#f59e0b',
+            exceededBorder: '#ef4444',
+            exceededBackground: '#fef2f2'
         }
     };
 
     // ===== СИСТЕМА ЛОГИРОВАНИЯ =====
     const logger = {
-        log: function(...args) {
+        info: (message, data = null) => {
             if (CONFIG.debugMode) {
-                console.log('📝 ТОП-Новости:', ...args);
+                console.log(`ℹ️ ${message}`, data || '');
             }
         },
-        error: function(...args) {
-            console.error('❌ ТОП-Новости:', ...args);
-        },
-        warn: function(...args) {
-            console.warn('⚠️ ТОП-Новости:', ...args);
-        },
-        info: function(...args) {
+        success: (message, data = null) => {
             if (CONFIG.debugMode) {
-                console.info('ℹ️ ТОП-Новости:', ...args);
+                console.log(`✅ ${message}`, data || '');
+            }
+        },
+        error: (message, error = null) => {
+            if (CONFIG.debugMode) {
+                console.error(`❌ ${message}`, error || '');
+            }
+        },
+        warn: (message, data = null) => {
+            if (CONFIG.debugMode) {
+                console.warn(`⚠️ ${message}`, data || '');
             }
         }
     };
@@ -66,25 +74,11 @@
     // ===== УТИЛИТЫ ОБРАБОТКИ ОШИБОК =====
     function safeExecute(operation, operationName, fallback = null) {
         try {
-            const result = operation();
-            logger.log(`✅ ${operationName} выполнена успешно`);
-            return result;
+            return operation();
         } catch (error) {
-            logger.error(`Ошибка в ${operationName}:`, error);
+            logger.error(`Ошибка в операции: ${operationName}`, error);
             return fallback;
         }
-    }
-
-    function debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
     }
 
     // ===== СИСТЕМА ОЖИДАНИЯ ЭЛЕМЕНТОВ =====
@@ -96,497 +90,324 @@
                 const element = document.querySelector(selector);
                 if (element) {
                     resolve(element);
-                    return true;
+                    return;
                 }
-                return false;
+                
+                if (Date.now() - startTime >= timeout) {
+                    reject(new Error(`Элемент не найден: ${selector}`));
+                    return;
+                }
+                
+                setTimeout(checkElement, CONFIG.checkInterval);
             };
-
-            if (checkElement()) return;
-
-            const observer = new MutationObserver(() => {
-                if (checkElement()) {
-                    observer.disconnect();
-                } else if (Date.now() - startTime > timeout) {
-                    observer.disconnect();
-                    reject(new Error(`Элемент ${selector} не найден за ${timeout}мс`));
-                }
-            });
-
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-
-            setTimeout(() => {
-                observer.disconnect();
-                if (!checkElement()) {
-                    reject(new Error(`Таймаут ожидания элемента: ${selector}`));
-                }
-            }, timeout);
+            
+            checkElement();
         });
     }
 
     // ===== СИСТЕМА ПРОВЕРКИ ОБНОВЛЕНИЙ =====
-    function compareVersions(a, b) {
-        const aParts = a.split('.').map(Number);
-        const bParts = b.split('.').map(Number);
-        
-        for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-            const aVal = aParts[i] || 0;
-            const bVal = bParts[i] || 0;
-            if (aVal > bVal) return 1;
-            if (aVal < bVal) return -1;
-        }
-        return 0;
-    }
-
     function checkForUpdates() {
-        return safeExecute(() => {
-            const lastCheck = GM_getValue(CONFIG.lastCheckKey, 0);
-            const now = Date.now();
-            
-            if (now - lastCheck < CONFIG.updateCheckInterval) {
-                logger.info('Проверка обновлений пропущена (еще не прошло 24 часа)');
-                return;
-            }
-            
-            logger.log('Проверка обновлений скрипта...');
-            GM_setValue(CONFIG.lastCheckKey, now);
-            
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: CONFIG.githubRawUrl + '?t=' + Date.now(),
-                timeout: 10000,
-                onload: function(response) {
-                    safeExecute(() => {
-                        if (response.status !== 200) {
-                            logger.warn('Ошибка HTTP при проверке обновлений:', response.status);
-                            return;
-                        }
-                        
-                        const scriptContent = response.responseText;
-                        const versionMatch = scriptContent.match(/@version\s+([\d.]+)/);
-                        
-                        if (!versionMatch) {
-                            logger.warn('Версия не найдена в файле');
-                            return;
-                        }
-                        
-                        const latestVersion = versionMatch[1];
-                        const currentVersion = GM_info.script.version;
-                        
-                        logger.log(`Версии: текущая ${currentVersion}, доступная ${latestVersion}`);
-                        
-                        if (compareVersions(latestVersion, currentVersion) > 0) {
-                            showUpdateNotification(currentVersion, latestVersion);
-                        } else {
-                            logger.log('Обновлений не найдено');
-                        }
-                    }, 'Обработка ответа обновления');
-                },
-                onerror: function(error) {
-                    logger.error('Ошибка сети при проверке обновлений:', error);
-                },
-                ontimeout: function() {
-                    logger.warn('Таймаут при проверке обновлений');
-                }
-            });
-        }, 'checkForUpdates');
-    }
-
-    function showUpdateNotification(currentVersion, latestVersion) {
-        safeExecute(() => {
-            const ignoredVersion = GM_getValue(CONFIG.ignoreUpdateKey, '');
-            if (ignoredVersion === latestVersion) {
-                logger.log('Обновление проигнорировано пользователем:', latestVersion);
-                return;
-            }
-            
-            const notificationDetails = 
-                `Текущая версия: ${currentVersion}\n` +
-                `Доступна версия: ${latestVersion}\n\n` +
-                `Что нового:\n` +
-                `• Исправлена система обновлений\n` +
-                `• Улучшена стабильность работы\n` +
-                `• Оптимизирована производительность`;
-            
-            if (typeof GM_notification === 'function') {
-                GM_notification({
-                    title: 'Доступно обновление скрипта! 🚀',
-                    text: `Версия ${latestVersion} доступна для установки`,
-                    image: 'https://github.com/favicon.ico',
-                    timeout: 10000,
-                    onclick: function() {
-                        handleUpdateConfirmation(currentVersion, latestVersion, notificationDetails);
-                    }
-                });
-            } else {
-                handleUpdateConfirmation(currentVersion, latestVersion, notificationDetails);
-            }
-        }, 'showUpdateNotification');
-    }
-
-    function handleUpdateConfirmation(currentVersion, latestVersion, details) {
-        const userChoice = confirm(
-            'ДОСТУПНО ОБНОВЛЕНИЕ СКРИПТА!\n\n' +
-            details + '\n\n' +
-            'ВАЖНО: Скрипт не может обновиться автоматически.\n\n' +
-            'Чтобы установить обновление:\n' +
-            '1. Нажмите OK чтобы открыть страницу установки\n' +
-            '2. На открывшейся странице нажмите "Обновить"\n' +
-            '3. Подтвердите установку\n\n' +
-            'Нажмите OK чтобы продолжить или Отмена чтобы проигнорировать это обновление.'
-        );
-        
-        if (userChoice) {
-            window.location.href = CONFIG.githubRawUrl;
-        } else {
-            GM_setValue(CONFIG.ignoreUpdateKey, latestVersion);
-            logger.log('Пользователь проигнорировал обновление:', latestVersion);
-        }
-    }
-
-    // ===== ОСНОВНАЯ ЛОГИКА УСТАНОВКИ ДАТЫ =====
-    let lastProcessedDate = '';
-
-    function calculateEndDate(startDateValue) {
-        return safeExecute(() => {
-            if (!startDateValue || typeof startDateValue !== 'string') {
-                throw new Error('Неверный формат даты публикации');
-            }
-
-            if (startDateValue === lastProcessedDate) {
-                return null;
-            }
-
-            const [datePart, timePart = '00:00'] = startDateValue.split(' ');
-            const [day, month, year] = datePart.split('.').map(Number);
-            
-            if (!day || !month || !year || day > 31 || month > 12 || year < 2000) {
-                throw new Error(`Неверный формат даты: ${startDateValue}`);
-            }
-
-            const startDate = new Date(year, month - 1, day);
-            
-            if (isNaN(startDate.getTime())) {
-                throw new Error(`Неверная дата: ${startDateValue}`);
-            }
-
-            const endDate = new Date(startDate);
-            endDate.setDate(endDate.getDate() + CONFIG.dateOffsetDays);
-            
-            const formattedEndDate =
-                `${String(endDate.getDate()).padStart(2, '0')}.` +
-                `${String(endDate.getMonth() + 1).padStart(2, '0')}.` +
-                `${endDate.getFullYear()} ${timePart}`;
-
-            lastProcessedDate = startDateValue;
-
-            logger.log(`Рассчитана дата: ${startDateValue} → ${formattedEndDate}`);
-            return formattedEndDate;
-        }, 'calculateEndDate', null);
-    }
-
-    function setTopEndDate() {
-        return safeExecute(() => {
-            logger.log('Попытка установки даты ТОП новости...');
-            
-            const startDateInput = document.querySelector('input[name="start_date"]');
-            const topEndDateInput = document.querySelector('input[name="top_end_date"]');
-
-            if (!startDateInput || !topEndDateInput) {
-                logger.warn('Не все обязательные поля найдены');
-                return false;
-            }
-
-            const startDateValue = startDateInput.value.trim();
-            if (!startDateValue) {
-                logger.log('Дата публикации пустая - ожидание ввода');
-                return false;
-            }
-
-            const formattedEndDate = calculateEndDate(startDateValue);
-            if (!formattedEndDate) {
-                return true;
-            }
-
-            if (topEndDateInput.value !== formattedEndDate) {
-                topEndDateInput.value = formattedEndDate;
-                
-                const events = ['change', 'input', 'blur'];
-                events.forEach(eventType => {
-                    topEndDateInput.dispatchEvent(new Event(eventType, { 
-                        bubbles: true, 
-                        cancelable: true 
-                    }));
-                });
-                
-                logger.info('✅ Дата деактивации ТОП новости установлена:', formattedEndDate);
-                showSuccessIndicator();
-                return true;
-            } else {
-                logger.log('Дата уже установлена правильно');
-                return true;
-            }
-        }, 'setTopEndDate', false);
+        logger.info('Проверка обновлений...');
+        // Автоматическая проверка через @updateURL в метаданных
     }
 
     // ===== ВИЗУАЛЬНЫЕ ИНДИКАТОРЫ И СТИЛИ =====
-    function showSuccessIndicator() {
-        safeExecute(() => {
-            const topEndInput = document.querySelector('input[name="top_end_date"]');
-            if (topEndInput) {
-                // Сохранение оригинальных визуальных стилей
-                topEndInput.style.backgroundColor = CONFIG.visualStyles.successBackground;
-                topEndInput.style.borderColor = CONFIG.visualStyles.successBorder;
-                
-                setTimeout(() => {
-                    topEndInput.style.backgroundColor = '';
-                    topEndInput.style.borderColor = '';
-                }, 2000);
-            }
-        }, 'showSuccessIndicator');
-    }
-
-    function addVisualIndicators() {
+    function addVisualStyles() {
         return safeExecute(() => {
             const style = document.createElement('style');
-            style.id = 'top-news-auto-date-styles';
-            
-            // Сохранение всех оригинальных CSS стилей и цветов
             style.textContent = `
-                input[name="top_end_date"] {
-                    background-color: ${CONFIG.visualStyles.inputBackground} !important;
-                    border: 2px solid ${CONFIG.visualStyles.inputBorder} !important;
-                    position: relative;
-                    transition: all 0.3s ease;
+                /* 🎨 СТИЛИ ПЕРЕКЛЮЧАТЕЛЯ АКТИВНОСТИ */
+                input[name="active"][class*="toggleswitch"] + .toggle .toggle-on {
+                    background: ${CONFIG.visualStyles.indicatorGradient} !important;
+                    color: white !important;
+                    font-weight: bold !important;
+                    text-shadow: 0 1px 2px rgba(0,0,0,0.2) !important;
                 }
-                input[name="top_end_date"]:focus {
-                    background-color: ${CONFIG.visualStyles.focusBackground} !important;
-                    border-color: ${CONFIG.visualStyles.focusBorder} !important;
+
+                input[name="active"][class*="toggleswitch"] + .toggle .toggle-off {
+                    background: #6b7280 !important;
+                    color: white !important;
+                    font-weight: bold !important;
                 }
-                .auto-date-indicator {
-                    position: absolute;
-                    right: 8px;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    background: ${CONFIG.visualStyles.indicatorGradient};
-                    color: white;
-                    padding: 3px 8px;
-                    border-radius: 4px;
-                    font-size: 11px;
+
+                input[name="active"][class*="toggleswitch"] + .toggle .toggle-handle {
+                    background: white !important;
+                    border: 2px solid #e5e7eb !important;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+                    transition: all 0.3s ease !important;
+                }
+
+                input[name="active"][class*="toggleswitch"]:checked + .toggle .toggle-handle {
+                    border-color: ${CONFIG.visualStyles.primaryBlue} !important;
+                    box-shadow: 0 2px 8px ${CONFIG.visualStyles.inputFocusShadow} !important;
+                }
+
+                /* 🎨 СТИЛИ ПОЯСНЯЮЩЕГО БЛОКА */
+                .activity-explanation {
+                    margin-top: 12px !important;
+                    padding: 12px 16px !important;
+                    border-radius: 8px !important;
+                    font-size: 14px !important;
+                    font-weight: 500 !important;
+                    border-left: 4px solid !important;
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.05) !important;
+                }
+
+                .activity-explanation.active {
+                    background: ${CONFIG.visualStyles.successStateBackground} !important;
+                    border-left-color: ${CONFIG.visualStyles.successStateBorder} !important;
+                    color: #065f46 !important;
+                }
+
+                .activity-explanation.inactive {
+                    background: ${CONFIG.visualStyles.exceededBackground} !important;
+                    border-left-color: ${CONFIG.visualStyles.exceededBorder} !important;
+                    color: #7f1d1d !important;
+                }
+
+                .activity-explanation .status-icon {
+                    display: inline-block;
+                    margin-right: 8px;
                     font-weight: bold;
-                    pointer-events: none;
-                    z-index: 1000;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
                 }
-                .auto-date-success {
-                    border-color: ${CONFIG.visualStyles.successStateBorder} !important;
-                    background-color: ${CONFIG.visualStyles.successStateBackground} !important;
+
+                .activity-explanation .hint {
+                    font-size: 12px !important;
+                    margin-top: 6px !important;
+                    opacity: 0.8 !important;
+                    font-weight: normal !important;
+                }
+
+                /* 🎨 АНИМАЦИИ */
+                @keyframes pulseSuccess {
+                    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+                    70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+                    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+                }
+
+                .activity-explanation.active.pulse {
+                    animation: pulseSuccess 2s infinite;
                 }
             `;
-            
             document.head.appendChild(style);
-
-            const addIndicator = () => {
-                const topEndInput = document.querySelector('input[name="top_end_date"]');
-                if (topEndInput && !topEndInput.parentNode.querySelector('.auto-date-indicator')) {
-                    const indicator = document.createElement('div');
-                    indicator.className = 'auto-date-indicator';
-                    indicator.textContent = 'авто';
-                    indicator.title = 'Дата установлена автоматически';
-                    
-                    topEndInput.parentNode.style.position = 'relative';
-                    topEndInput.parentNode.appendChild(indicator);
-                    
-                    topEndInput.classList.add('auto-date-success');
-                    
-                    logger.log('✅ Визуальный индикатор добавлен');
-                }
-            };
-
-            setTimeout(addIndicator, 500);
-            
-            const indicatorObserver = new MutationObserver(addIndicator);
-            indicatorObserver.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-
-            window._topNewsObservers = window._topNewsObservers || [];
-            window._topNewsObservers.push(indicatorObserver);
-
-            return true;
-        }, 'addVisualIndicators', false);
+            logger.success('Визуальные стили добавлены');
+            return style;
+        }, 'Добавление визуальных стилей');
     }
 
-    // ===== УПРАВЛЕНИЕ СОБЫТИЯМИ И НАБЛЮДАТЕЛЯМИ =====
-    function setupEventListeners() {
+    // ===== ОСНОВНАЯ ЛОГИКА =====
+    function enhanceActivityToggle() {
         return safeExecute(() => {
-            const startDateInput = document.querySelector('input[name="start_date"]');
-            if (!startDateInput) {
-                logger.warn('Поле даты публикации не найдено для настройки слушателей');
+            logger.info('Поиск переключателя активности...');
+
+            const checkToggle = setInterval(function() {
+                const toggleSwitch = document.querySelector(CONFIG.toggleSelector);
+                
+                if (toggleSwitch) {
+                    logger.success('Переключатель активности найден', toggleSwitch);
+                    clearInterval(checkToggle);
+                    setupToggleEnhancements(toggleSwitch);
+                }
+            }, CONFIG.checkInterval);
+
+            // Останавливаем проверку через максимальное время ожидания
+            setTimeout(() => {
+                clearInterval(checkToggle);
+                logger.warn('Поиск переключателя завершен по таймауту');
+            }, CONFIG.maxWaitTime);
+
+            return true;
+        }, 'Улучшение переключателя активности');
+    }
+
+    function setupToggleEnhancements(toggleSwitch) {
+        return safeExecute(() => {
+            const toggleContainer = toggleSwitch.closest('.form-group');
+            
+            if (!toggleContainer) {
+                logger.error('Контейнер переключателя не найден');
                 return false;
             }
 
-            logger.log('Настройка слушателей событий для поля даты публикации...');
+            // Создаем поясняющий блок
+            const explanation = createExplanationElement();
+            
+            // Функция обновления состояния
+            const updateExplanation = createUpdateHandler(toggleSwitch, explanation);
+            
+            // Настраиваем отслеживание изменений
+            setupChangeTracking(toggleSwitch, updateExplanation);
+            
+            // Вставляем пояснение в DOM
+            insertExplanationElement(toggleContainer, explanation, toggleSwitch);
+            
+            // Улучшаем визуальное отображение переключателя
+            enhanceToggleAppearance(toggleContainer);
+            
+            // Инициализируем начальное состояние
+            updateExplanation();
+            
+            logger.success('Улучшения переключателя применены');
+            return true;
+        }, 'Настройка улучшений переключателя');
+    }
 
-            const debouncedDateHandler = debounce(() => {
-                setTimeout(setTopEndDate, 100);
-            }, 500);
+    function createExplanationElement() {
+        const explanation = document.createElement('div');
+        explanation.className = 'activity-explanation';
+        explanation.setAttribute('data-enhanced', 'true');
+        return explanation;
+    }
 
-            const events = ['change', 'input', 'blur'];
-            events.forEach(eventType => {
-                startDateInput.addEventListener(eventType, debouncedDateHandler, {
-                    passive: true,
-                    capture: false
-                });
+    function createUpdateHandler(toggleSwitch, explanation) {
+        return function() {
+            const isActive = toggleSwitch.checked;
+            
+            if (isActive) {
+                explanation.className = 'activity-explanation active pulse';
+                explanation.innerHTML = `
+                    <span class="status-icon">✅</span>
+                    <strong>Новость ОТОБРАЖАЕТСЯ на сайте</strong>
+                    <div class="hint">Пользователи видят эту новость в ленте и могут ее читать</div>
+                `;
+            } else {
+                explanation.className = 'activity-explanation inactive';
+                explanation.innerHTML = `
+                    <span class="status-icon">❌</span>
+                    <strong>Новость СКРЫТА с сайта</strong>
+                    <div class="hint">Пользователи не видят эту новость в ленте</div>
+                `;
+            }
+        };
+    }
+
+    function setupChangeTracking(toggleSwitch, updateHandler) {
+        // Обработчик события change
+        toggleSwitch.addEventListener('change', updateHandler);
+        
+        // Обработчик события click для мгновенного обновления
+        toggleSwitch.addEventListener('click', updateHandler);
+        
+        // MutationObserver для отслеживания изменений в DOM
+        const observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                if (mutation.type === 'attributes' && 
+                    (mutation.attributeName === 'checked' || mutation.attributeName === 'class')) {
+                    setTimeout(updateHandler, 10);
+                }
             });
-
-            const attributeObserver = new MutationObserver(function(mutations) {
+        });
+        
+        observer.observe(toggleSwitch, {
+            attributes: true,
+            attributeFilter: ['checked', 'class']
+        });
+        
+        // Отслеживаем изменения в родительском элементе (для bootstrap-toggle)
+        const toggleParent = toggleSwitch.closest('.toggle');
+        if (toggleParent) {
+            const parentObserver = new MutationObserver(function(mutations) {
                 mutations.forEach(function(mutation) {
-                    if (mutation.type === 'attributes' && 
-                        (mutation.attributeName === 'value' || mutation.attributeName === 'data-value')) {
-                        debouncedDateHandler();
+                    if (mutation.type === 'attributes') {
+                        setTimeout(updateHandler, 10);
                     }
                 });
             });
-
-            attributeObserver.observe(startDateInput, {
+            
+            parentObserver.observe(toggleParent, {
                 attributes: true,
-                attributeFilter: ['value', 'data-value']
+                attributeFilter: ['class']
             });
-
-            window._topNewsObservers = window._topNewsObservers || [];
-            window._topNewsObservers.push(attributeObserver);
-
-            logger.info('✅ Слушатели событий настроены');
-            return true;
-        }, 'setupEventListeners', false);
+        }
     }
 
-    // ===== ОСНОВНАЯ ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ =====
-    async function initialize() {
-        logger.info('🚀 Инициализация скрипта автоматической установки даты ТОП новости...');
+    function insertExplanationElement(container, explanation, toggleSwitch) {
+        const toggleWidget = container.querySelector('.toggle');
+        if (toggleWidget) {
+            toggleWidget.parentNode.insertBefore(explanation, toggleWidget.nextSibling);
+        } else {
+            container.appendChild(explanation);
+        }
+    }
 
-        try {
-            await Promise.race([
-                waitForElement('input[name="start_date"]'),
-                waitForElement('input[name="top_end_date"]')
-            ]);
-
-            logger.log('✅ Обязательные поля найдены');
-
-            setupEventListeners();
-            addVisualIndicators();
-            
-            setTimeout(setTopEndDate, 1000);
-
-        } catch (error) {
-            logger.error('Ошибка инициализации:', error);
-            
-            const backupCheck = setInterval(() => {
-                const startDateInput = document.querySelector('input[name="start_date"]');
-                const topEndDateInput = document.querySelector('input[name="top_end_date"]');
+    function enhanceToggleAppearance(container) {
+        setTimeout(() => {
+            const toggleBtn = container.querySelector('.toggle-group');
+            if (toggleBtn) {
+                const onLabel = toggleBtn.querySelector('.toggle-on');
+                const offLabel = toggleBtn.querySelector('.toggle-off');
                 
-                if (startDateInput && topEndDateInput) {
-                    clearInterval(backupCheck);
-                    logger.log('✅ Поля найдены через резервную проверку');
-                    setupEventListeners();
-                    addVisualIndicators();
-                    setTopEndDate();
+                if (onLabel) {
+                    onLabel.textContent = 'АКТИВНА';
+                    onLabel.style.fontWeight = 'bold';
+                    onLabel.style.fontSize = '11px';
+                    onLabel.style.padding = '0 10px';
+                    onLabel.style.letterSpacing = '0.5px';
                 }
-            }, 1000);
+                
+                if (offLabel) {
+                    offLabel.textContent = 'СКРЫТА';
+                    offLabel.style.fontWeight = 'bold';
+                    offLabel.style.fontSize = '11px';
+                    offLabel.style.padding = '0 10px';
+                    offLabel.style.letterSpacing = '0.5px';
+                }
+            }
+        }, 100);
+    }
 
-            setTimeout(() => clearInterval(backupCheck), CONFIG.maxWaitTime);
+    // ===== УПРАВЛЕНИЕ СОБЫТИЯМИ =====
+    function setupEventListeners() {
+        logger.info('Настройка обработчиков событий...');
+        // Дополнительные глобальные обработчики могут быть добавлены здесь
+    }
+
+    // ===== ИНИЦИАЛИЗАЦИЯ =====
+    async function initialize() {
+        logger.info('🚀 Инициализация улучшенного переключателя активности...');
+        
+        try {
+            // Добавляем визуальные стили
+            await safeExecute(addVisualStyles, 'Добавление стилей');
+            
+            // Настраиваем обработчики событий
+            await safeExecute(setupEventListeners, 'Настройка обработчиков событий');
+            
+            // Запускаем основную функциональность
+            await safeExecute(enhanceActivityToggle, 'Улучшение переключателя активности');
+            
+            // Проверяем обновления
+            await safeExecute(checkForUpdates, 'Проверка обновлений');
+            
+            logger.success('✅ Скрипт успешно инициализирован!');
+            logger.info('📝 Автор: Островский Николай Николаевич, Запорожское региональное отделение Партии «Единая Россия»');
+            
+        } catch (error) {
+            logger.error('Ошибка инициализации скрипта', error);
         }
     }
 
     // ===== УПРАВЛЕНИЕ ЖИЗНЕННЫМ ЦИКЛОМ =====
     function cleanup() {
-        logger.log('🧹 Очистка ресурсов скрипта...');
-        
-        if (window._topNewsObservers) {
-            window._topNewsObservers.forEach(observer => {
-                safeExecute(() => observer.disconnect(), 'Отключение наблюдателя');
-            });
-            window._topNewsObservers = [];
-        }
-        
-        const styles = document.getElementById('top-news-auto-date-styles');
-        if (styles) {
-            safeExecute(() => styles.remove(), 'Удаление стилей');
-        }
-        
-        const indicators = document.querySelectorAll('.auto-date-indicator');
-        indicators.forEach(indicator => {
-            safeExecute(() => indicator.remove(), 'Удаление индикатора');
-        });
-        
-        logger.log('✅ Очистка завершена');
+        logger.info('Очистка ресурсов...');
+        // Здесь может быть добавлена логика очистки при необходимости
     }
-
-    // ===== ОБРАБОТЧИКИ СОБЫТИЙ ЖИЗНЕННОГО ЦИКЛА =====
-    if (typeof GM_unload === 'function') {
-        GM_unload(cleanup);
-    }
-    
-    window.addEventListener('beforeunload', cleanup);
-    window.addEventListener('pagehide', cleanup);
-
-    const globalObserver = new MutationObserver(debounce(function(mutations) {
-        safeExecute(() => {
-            mutations.forEach(function(mutation) {
-                if (mutation.addedNodes.length) {
-                    mutation.addedNodes.forEach(function(node) {
-                        if (node.nodeType === 1 && node.querySelector) {
-                            if (node.querySelector('input[name="start_date"]')) {
-                                logger.log('🔄 Обнаружены динамически добавленные поля дат');
-                                setTimeout(() => {
-                                    setupEventListeners();
-                                    setTopEndDate();
-                                }, 500);
-                            }
-                        }
-                    });
-                }
-            });
-        }, 'Обработка мутаций DOM');
-    }, 500));
 
     // ===== ЗАПУСК СКРИПТА =====
-    function startScript() {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                logger.log('📄 DOM загружен, запуск инициализации...');
-                globalObserver.observe(document.body, {
-                    childList: true,
-                    subtree: true
-                });
-                initialize();
-                
-                setTimeout(checkForUpdates, 10000);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            initialize().catch(error => {
+                logger.error('Критическая ошибка при инициализации', error);
             });
-        } else {
-            logger.log('📄 DOM уже загружен, запуск инициализации...');
-            globalObserver.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-            initialize();
-            
-            setTimeout(checkForUpdates, 10000);
-        }
-
-        window.addEventListener('load', function() {
-            logger.log('🎯 Страница полностью загружена, финальная проверка...');
-            setTimeout(() => {
-                setTopEndDate();
-            }, 2000);
+        });
+    } else {
+        initialize().catch(error => {
+            logger.error('Критическая ошибка при инициализации', error);
         });
     }
 
-    // Запуск основной функции
-    startScript();
+    // Очистка при выгрузке страницы
+    window.addEventListener('beforeunload', cleanup);
 
 })();
