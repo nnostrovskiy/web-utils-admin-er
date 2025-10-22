@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Комбинированный скрипт: Установка даты ТОП и ограничение символов
 // @namespace    https://github.com/nnostrovskiy/web-utils-admin-er
-// @version      1.0.1
+// @version      1.0.2
 // @description  Автоматически устанавливает дату деактивации ТОП новости на неделю вперед и ограничивает ввод до 90 символов в поле "Заголовок для топ новости" с отображением счетчика. Улучшенная версия с обработкой ошибок и оптимизацией производительности.
 // @author       Островский Николай Николаевич, Запорожское региональное отделение Партии «Единая Россия»
 // @match        https://admin.er.ru/admin/news/create
@@ -226,6 +226,7 @@
                 `• Объединены функции установки даты и ограничения символов\n` +
                 `• Синяя цветовая схема для счетчика символов\n` +
                 `• Мгновенное обновление счетчика в реальном времени\n` +
+                `• Индикатор "90 max" в поле заголовка ТОП\n` +
                 `• Улучшена стабильность работы`;
             
             if (typeof GM_notification === 'function') {
@@ -352,6 +353,7 @@
     // ===== СИСТЕМА ОГРАНИЧЕНИЯ СИМВОЛОВ (ОБНОВЛЕННАЯ) =====
     function setupCharCounter() {
         return safeExecute(() => {
+            // Ищем поле по name="title_top"
             const titleTopInput = document.querySelector('input[name="title_top"]');
             if (!titleTopInput) {
                 logger.warn('Поле "Заголовок для топ новости" не найдено');
@@ -465,38 +467,6 @@
             // Инициализируем счетчик сразу
             updateCounter();
 
-            // Добавляем индикатор для поля заголовка (аналогично полю даты)
-            const addTitleIndicator = () => {
-                if (!titleTopInput.parentNode.querySelector('.title-top-indicator')) {
-                    const indicator = document.createElement('div');
-                    indicator.className = 'title-top-indicator';
-                    indicator.textContent = '90 max';
-                    indicator.title = 'Ограничение 90 символов';
-                    indicator.style.cssText = `
-                        position: absolute;
-                        right: 8px;
-                        top: 50%;
-                        transform: translateY(-50%);
-                        background: ${CONFIG.visualStyles.indicatorGradient};
-                        color: white;
-                        padding: 3px 8px;
-                        border-radius: 4px;
-                        font-size: 11px;
-                        font-weight: bold;
-                        pointer-events: none;
-                        z-index: 1000;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                    `;
-                    
-                    titleTopInput.parentNode.style.position = 'relative';
-                    titleTopInput.parentNode.appendChild(indicator);
-                    
-                    logger.log('✅ Индикатор для поля заголовка добавлен');
-                }
-            };
-
-            setTimeout(addTitleIndicator, 500);
-
             logger.info('✅ Ограничитель символов настроен с мгновенным обновлением');
             return true;
         }, 'setupCharCounter', false);
@@ -519,7 +489,7 @@
         }, 'showSuccessIndicator');
     }
 
-    function addVisualStyles() {
+    function addVisualIndicators() {
         return safeExecute(() => {
             const style = document.createElement('style');
             style.id = 'top-news-combined-styles';
@@ -583,6 +553,23 @@
                     background-color: ${CONFIG.visualStyles.exceededBackground} !important;
                 }
 
+                /* Индикатор для поля заголовка ТОП */
+                .title-top-indicator {
+                    position: absolute;
+                    right: 8px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    background: ${CONFIG.visualStyles.indicatorGradient};
+                    color: white;
+                    padding: 3px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: bold;
+                    pointer-events: none;
+                    z-index: 1000;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                }
+
                 /* Анимация для плавного изменения цвета счетчика */
                 .char-counter {
                     transition: color 0.2s ease !important;
@@ -591,7 +578,7 @@
             
             document.head.appendChild(style);
 
-            // Добавляем индикатор для поля даты
+            // Функция добавления индикатора для поля даты
             const addDateIndicator = () => {
                 const topEndInput = document.querySelector('input[name="top_end_date"]');
                 if (topEndInput && !topEndInput.parentNode.querySelector('.auto-date-indicator')) {
@@ -609,37 +596,32 @@
                 }
             };
 
-            setTimeout(addDateIndicator, 500);
+            // Функция добавления индикатора для поля заголовка ТОП
+            const addTitleIndicator = () => {
+                const titleTopInput = document.querySelector('input[name="title_top"]');
+                if (titleTopInput && !titleTopInput.parentNode.querySelector('.title-top-indicator')) {
+                    const indicator = document.createElement('div');
+                    indicator.className = 'title-top-indicator';
+                    indicator.textContent = '90 max';
+                    indicator.title = 'Ограничение 90 символов';
+                    
+                    titleTopInput.parentNode.style.position = 'relative';
+                    titleTopInput.parentNode.appendChild(indicator);
+                    
+                    logger.log('✅ Индикатор "90 max" для поля заголовка добавлен');
+                }
+            };
+
+            // Добавляем индикаторы с небольшой задержкой
+            setTimeout(() => {
+                addDateIndicator();
+                addTitleIndicator();
+            }, 500);
             
+            // Наблюдатель для динамически добавляемых полей
             const indicatorObserver = new MutationObserver(function(mutations) {
                 addDateIndicator();
-                
-                // Также проверяем поле заголовка
-                const titleInput = document.querySelector('input[name="title_top"]');
-                if (titleInput && !titleInput.parentNode.querySelector('.title-top-indicator')) {
-                    const titleIndicator = document.createElement('div');
-                    titleIndicator.className = 'title-top-indicator';
-                    titleIndicator.textContent = '90 max';
-                    titleIndicator.title = 'Ограничение 90 символов';
-                    titleIndicator.style.cssText = `
-                        position: absolute;
-                        right: 8px;
-                        top: 50%;
-                        transform: translateY(-50%);
-                        background: ${CONFIG.visualStyles.indicatorGradient};
-                        color: white;
-                        padding: 3px 8px;
-                        border-radius: 4px;
-                        font-size: 11px;
-                        font-weight: bold;
-                        pointer-events: none;
-                        z-index: 1000;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                    `;
-                    
-                    titleInput.parentNode.style.position = 'relative';
-                    titleInput.parentNode.appendChild(titleIndicator);
-                }
+                addTitleIndicator();
             });
 
             indicatorObserver.observe(document.body, {
@@ -651,7 +633,7 @@
             window._topNewsObservers.push(indicatorObserver);
 
             return true;
-        }, 'addVisualStyles', false);
+        }, 'addVisualIndicators', false);
     }
 
     // ===== УПРАВЛЕНИЕ СОБЫТИЯМИ И НАБЛЮДАТЕЛЯМИ =====
@@ -726,7 +708,7 @@
 
             // Настраиваем все системы
             setupEventListeners();
-            addVisualStyles();
+            addVisualIndicators();
             
             // Запускаем начальную установку даты
             setTimeout(setTopEndDate, 1000);
@@ -745,7 +727,7 @@
                     clearInterval(backupCheck);
                     logger.log('✅ Поля найдены через резервную проверку');
                     setupEventListeners();
-                    addVisualStyles();
+                    addVisualIndicators();
                     setTopEndDate();
                 }
             }, 1000);
