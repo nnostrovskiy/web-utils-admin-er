@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Автоматическая установка даты ТОП новости (Оптимизированная)
 // @namespace    https://github.com/nnostrovskiy/web-utils-admin-er
-// @version      1.2.8
+// @version      1.0.0
 // @description  Автоматически устанавливает дату деактивации ТОП новости на неделю вперед. Улучшенная версия с обработкой ошибок и оптимизацией производительности.
 // @author       Островский Николай Николаевич, Запорожское региональное отделение Партии «Единая Россия»
 // @match        https://admin.er.ru/admin/news/create
@@ -25,11 +25,22 @@
         debugMode: true,
         maxWaitTime: 15000,
         pollInterval: 500,
-        updateCheckInterval: 60, // 24 часа в миллисекундах
+        updateCheckInterval: 86400000, // 24 часа в миллисекундах
         githubRawUrl: 'https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/main/er.ru-topnews.user.js',
         lastCheckKey: 'lastUpdateCheck_v3',
         ignoreUpdateKey: 'ignoreUpdateVersion_v3',
-        dateOffsetDays: 7
+        dateOffsetDays: 7,
+        visualStyles: {
+            successBackground: '#d4edda',
+            successBorder: '#28a745',
+            inputBackground: '#f0f9ff',
+            inputBorder: '#3b82f6',
+            focusBackground: '#e1f5fe',
+            focusBorder: '#0288d1',
+            indicatorGradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+            successStateBackground: '#ecfdf5',
+            successStateBorder: '#10b981'
+        }
     };
 
     // ===== СИСТЕМА ЛОГИРОВАНИЯ =====
@@ -55,7 +66,9 @@
     // ===== УТИЛИТЫ ОБРАБОТКИ ОШИБОК =====
     function safeExecute(operation, operationName, fallback = null) {
         try {
-            return operation();
+            const result = operation();
+            logger.log(`✅ ${operationName} выполнена успешно`);
+            return result;
         } catch (error) {
             logger.error(`Ошибка в ${operationName}:`, error);
             return fallback;
@@ -79,17 +92,20 @@
         return new Promise((resolve, reject) => {
             const startTime = Date.now();
             
-            const existingElement = document.querySelector(selector);
-            if (existingElement) {
-                resolve(existingElement);
-                return;
-            }
-
-            const observer = new MutationObserver(function(mutations) {
+            const checkElement = () => {
                 const element = document.querySelector(selector);
                 if (element) {
-                    observer.disconnect();
                     resolve(element);
+                    return true;
+                }
+                return false;
+            };
+
+            if (checkElement()) return;
+
+            const observer = new MutationObserver(() => {
+                if (checkElement()) {
+                    observer.disconnect();
                 } else if (Date.now() - startTime > timeout) {
                     observer.disconnect();
                     reject(new Error(`Элемент ${selector} не найден за ${timeout}мс`));
@@ -103,17 +119,14 @@
 
             setTimeout(() => {
                 observer.disconnect();
-                const element = document.querySelector(selector);
-                if (element) {
-                    resolve(element);
-                } else {
+                if (!checkElement()) {
                     reject(new Error(`Таймаут ожидания элемента: ${selector}`));
                 }
             }, timeout);
         });
     }
 
-    // ===== УЛУЧШЕННАЯ СИСТЕМА ОБНОВЛЕНИЙ =====
+    // ===== СИСТЕМА ПРОВЕРКИ ОБНОВЛЕНИЙ =====
     function compareVersions(a, b) {
         const aParts = a.split('.').map(Number);
         const bParts = b.split('.').map(Number);
@@ -132,7 +145,6 @@
             const lastCheck = GM_getValue(CONFIG.lastCheckKey, 0);
             const now = Date.now();
             
-            // Проверяем не чаще чем раз в сутки
             if (now - lastCheck < CONFIG.updateCheckInterval) {
                 logger.info('Проверка обновлений пропущена (еще не прошло 24 часа)');
                 return;
@@ -143,15 +155,15 @@
             
             GM_xmlhttpRequest({
                 method: 'GET',
-                url: CONFIG.githubRawUrl + '?t=' + Date.now(), // Добавляем timestamp для избежания кеширования
+                url: CONFIG.githubRawUrl + '?t=' + Date.now(),
                 timeout: 10000,
                 onload: function(response) {
-                    if (response.status !== 200) {
-                        logger.warn('Ошибка HTTP при проверке обновлений:', response.status);
-                        return;
-                    }
-                    
-                    try {
+                    safeExecute(() => {
+                        if (response.status !== 200) {
+                            logger.warn('Ошибка HTTP при проверке обновлений:', response.status);
+                            return;
+                        }
+                        
                         const scriptContent = response.responseText;
                         const versionMatch = scriptContent.match(/@version\s+([\d.]+)/);
                         
@@ -170,9 +182,7 @@
                         } else {
                             logger.log('Обновлений не найдено');
                         }
-                    } catch (parseError) {
-                        logger.error('Ошибка парсинга ответа:', parseError);
-                    }
+                    }, 'Обработка ответа обновления');
                 },
                 onerror: function(error) {
                     logger.error('Ошибка сети при проверке обновлений:', error);
@@ -192,7 +202,6 @@
                 return;
             }
             
-            // Более информативное уведомление
             const notificationDetails = 
                 `Текущая версия: ${currentVersion}\n` +
                 `Доступна версия: ${latestVersion}\n\n` +
@@ -212,7 +221,6 @@
                     }
                 });
             } else {
-                // Fallback для браузеров без GM_notification
                 handleUpdateConfirmation(currentVersion, latestVersion, notificationDetails);
             }
         }, 'showUpdateNotification');
@@ -231,7 +239,6 @@
         );
         
         if (userChoice) {
-            // Открываем страницу установки в том же окне
             window.location.href = CONFIG.githubRawUrl;
         } else {
             GM_setValue(CONFIG.ignoreUpdateKey, latestVersion);
@@ -324,12 +331,14 @@
         }, 'setTopEndDate', false);
     }
 
+    // ===== ВИЗУАЛЬНЫЕ ИНДИКАТОРЫ И СТИЛИ =====
     function showSuccessIndicator() {
         safeExecute(() => {
             const topEndInput = document.querySelector('input[name="top_end_date"]');
             if (topEndInput) {
-                topEndInput.style.backgroundColor = '#d4edda';
-                topEndInput.style.borderColor = '#28a745';
+                // Сохранение оригинальных визуальных стилей
+                topEndInput.style.backgroundColor = CONFIG.visualStyles.successBackground;
+                topEndInput.style.borderColor = CONFIG.visualStyles.successBorder;
                 
                 setTimeout(() => {
                     topEndInput.style.backgroundColor = '';
@@ -337,6 +346,78 @@
                 }, 2000);
             }
         }, 'showSuccessIndicator');
+    }
+
+    function addVisualIndicators() {
+        return safeExecute(() => {
+            const style = document.createElement('style');
+            style.id = 'top-news-auto-date-styles';
+            
+            // Сохранение всех оригинальных CSS стилей и цветов
+            style.textContent = `
+                input[name="top_end_date"] {
+                    background-color: ${CONFIG.visualStyles.inputBackground} !important;
+                    border: 2px solid ${CONFIG.visualStyles.inputBorder} !important;
+                    position: relative;
+                    transition: all 0.3s ease;
+                }
+                input[name="top_end_date"]:focus {
+                    background-color: ${CONFIG.visualStyles.focusBackground} !important;
+                    border-color: ${CONFIG.visualStyles.focusBorder} !important;
+                }
+                .auto-date-indicator {
+                    position: absolute;
+                    right: 8px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    background: ${CONFIG.visualStyles.indicatorGradient};
+                    color: white;
+                    padding: 3px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: bold;
+                    pointer-events: none;
+                    z-index: 1000;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                }
+                .auto-date-success {
+                    border-color: ${CONFIG.visualStyles.successStateBorder} !important;
+                    background-color: ${CONFIG.visualStyles.successStateBackground} !important;
+                }
+            `;
+            
+            document.head.appendChild(style);
+
+            const addIndicator = () => {
+                const topEndInput = document.querySelector('input[name="top_end_date"]');
+                if (topEndInput && !topEndInput.parentNode.querySelector('.auto-date-indicator')) {
+                    const indicator = document.createElement('div');
+                    indicator.className = 'auto-date-indicator';
+                    indicator.textContent = 'авто';
+                    indicator.title = 'Дата установлена автоматически';
+                    
+                    topEndInput.parentNode.style.position = 'relative';
+                    topEndInput.parentNode.appendChild(indicator);
+                    
+                    topEndInput.classList.add('auto-date-success');
+                    
+                    logger.log('✅ Визуальный индикатор добавлен');
+                }
+            };
+
+            setTimeout(addIndicator, 500);
+            
+            const indicatorObserver = new MutationObserver(addIndicator);
+            indicatorObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+
+            window._topNewsObservers = window._topNewsObservers || [];
+            window._topNewsObservers.push(indicatorObserver);
+
+            return true;
+        }, 'addVisualIndicators', false);
     }
 
     // ===== УПРАВЛЕНИЕ СОБЫТИЯМИ И НАБЛЮДАТЕЛЯМИ =====
@@ -384,76 +465,6 @@
         }, 'setupEventListeners', false);
     }
 
-    // ===== ВИЗУАЛЬНЫЕ УЛУЧШЕНИЯ =====
-    function addVisualIndicators() {
-        return safeExecute(() => {
-            const style = document.createElement('style');
-            style.id = 'top-news-auto-date-styles';
-            style.textContent = `
-                input[name="top_end_date"] {
-                    background-color: #f0f9ff !important;
-                    border: 2px solid #3b82f6 !important;
-                    position: relative;
-                    transition: all 0.3s ease;
-                }
-                input[name="top_end_date"]:focus {
-                    background-color: #e1f5fe !important;
-                    border-color: #0288d1 !important;
-                }
-                .auto-date-indicator {
-                    position: absolute;
-                    right: 8px;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-                    color: white;
-                    padding: 3px 8px;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: bold;
-                    pointer-events: none;
-                    z-index: 1000;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                }
-                .auto-date-success {
-                    border-color: #10b981 !important;
-                    background-color: #ecfdf5 !important;
-                }
-            `;
-            document.head.appendChild(style);
-
-            const addIndicator = () => {
-                const topEndInput = document.querySelector('input[name="top_end_date"]');
-                if (topEndInput && !topEndInput.parentNode.querySelector('.auto-date-indicator')) {
-                    const indicator = document.createElement('div');
-                    indicator.className = 'auto-date-indicator';
-                    indicator.textContent = 'авто';
-                    indicator.title = 'Дата установлена автоматически';
-                    
-                    topEndInput.parentNode.style.position = 'relative';
-                    topEndInput.parentNode.appendChild(indicator);
-                    
-                    topEndInput.classList.add('auto-date-success');
-                    
-                    logger.log('✅ Визуальный индикатор добавлен');
-                }
-            };
-
-            setTimeout(addIndicator, 500);
-            
-            const indicatorObserver = new MutationObserver(addIndicator);
-            indicatorObserver.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-
-            window._topNewsObservers = window._topNewsObservers || [];
-            window._topNewsObservers.push(indicatorObserver);
-
-            return true;
-        }, 'addVisualIndicators', false);
-    }
-
     // ===== ОСНОВНАЯ ФУНКЦИЯ ИНИЦИАЛИЗАЦИИ =====
     async function initialize() {
         logger.info('🚀 Инициализация скрипта автоматической установки даты ТОП новости...');
@@ -497,25 +508,25 @@
         
         if (window._topNewsObservers) {
             window._topNewsObservers.forEach(observer => {
-                try {
-                    observer.disconnect();
-                } catch (e) {}
+                safeExecute(() => observer.disconnect(), 'Отключение наблюдателя');
             });
             window._topNewsObservers = [];
         }
         
         const styles = document.getElementById('top-news-auto-date-styles');
         if (styles) {
-            styles.remove();
+            safeExecute(() => styles.remove(), 'Удаление стилей');
         }
         
         const indicators = document.querySelectorAll('.auto-date-indicator');
-        indicators.forEach(indicator => indicator.remove());
+        indicators.forEach(indicator => {
+            safeExecute(() => indicator.remove(), 'Удаление индикатора');
+        });
         
         logger.log('✅ Очистка завершена');
     }
 
-    // ===== ОБРАБОТЧИКИ СОБЫТИЙ =====
+    // ===== ОБРАБОТЧИКИ СОБЫТИЙ ЖИЗНЕННОГО ЦИКЛА =====
     if (typeof GM_unload === 'function') {
         GM_unload(cleanup);
     }
@@ -524,58 +535,58 @@
     window.addEventListener('pagehide', cleanup);
 
     const globalObserver = new MutationObserver(debounce(function(mutations) {
-        mutations.forEach(function(mutation) {
-            if (mutation.addedNodes.length) {
-                mutation.addedNodes.forEach(function(node) {
-                    if (node.nodeType === 1 && node.querySelector) {
-                        if (node.querySelector('input[name="start_date"]')) {
-                            logger.log('🔄 Обнаружены динамически добавленные поля дат');
-                            setTimeout(() => {
-                                setupEventListeners();
-                                setTopEndDate();
-                            }, 500);
+        safeExecute(() => {
+            mutations.forEach(function(mutation) {
+                if (mutation.addedNodes.length) {
+                    mutation.addedNodes.forEach(function(node) {
+                        if (node.nodeType === 1 && node.querySelector) {
+                            if (node.querySelector('input[name="start_date"]')) {
+                                logger.log('🔄 Обнаружены динамически добавленные поля дат');
+                                setTimeout(() => {
+                                    setupEventListeners();
+                                    setTopEndDate();
+                                }, 500);
+                            }
                         }
-                    }
-                });
-            }
-        });
+                    });
+                }
+            });
+        }, 'Обработка мутаций DOM');
     }, 500));
 
     // ===== ЗАПУСК СКРИПТА =====
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            logger.log('📄 DOM загружен, запуск инициализации...');
+    function startScript() {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                logger.log('📄 DOM загружен, запуск инициализации...');
+                globalObserver.observe(document.body, {
+                    childList: true,
+                    subtree: true
+                });
+                initialize();
+                
+                setTimeout(checkForUpdates, 10000);
+            });
+        } else {
+            logger.log('📄 DOM уже загружен, запуск инициализации...');
             globalObserver.observe(document.body, {
                 childList: true,
                 subtree: true
             });
             initialize();
             
-            // Откладываем проверку обновлений чтобы не мешать основной работе
             setTimeout(checkForUpdates, 10000);
+        }
+
+        window.addEventListener('load', function() {
+            logger.log('🎯 Страница полностью загружена, финальная проверка...');
+            setTimeout(() => {
+                setTopEndDate();
+            }, 2000);
         });
-    } else {
-        logger.log('📄 DOM уже загружен, запуск инициализации...');
-        globalObserver.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-        initialize();
-        
-        setTimeout(checkForUpdates, 10000);
     }
 
-    window.addEventListener('load', function() {
-        logger.log('🎯 Страница полностью загружена, финальная проверка...');
-        setTimeout(() => {
-            setTopEndDate();
-        }, 2000);
-    });
+    // Запуск основной функции
+    startScript();
 
 })();
-
-
-
-
-
-
