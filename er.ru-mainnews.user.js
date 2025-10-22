@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Вставка без форматирования с сохранением абзацев
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.0.0
 // @description  Вставляет текст без форматирования по Ctrl+V, сохраняя существующие абзацы и убирая лишние пробелы
 // @author       Островский Николай Николаевич, Запорожское региональное отделение Партии «Единая Россия»
 // @match        https://admin.er.ru/admin/news/create
@@ -481,5 +481,6 @@
 
     // Очистка при выгрузке страницы
     window.addEventListener('beforeunload', cleanup);
+
 
 })();
