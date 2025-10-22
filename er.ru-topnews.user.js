@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Автоматическая установка даты ТОП новости (Оптимизированная)
 // @namespace    https://github.com/nnostrovskiy/web-utils-admin-er
-// @version      1.2.0
+// @version      1.2.1
 // @description  Автоматически устанавливает дату деактивации ТОП новости на неделю вперед. Улучшенная версия с обработкой ошибок и оптимизацией производительности.
 // @author       Островский Николай Николаевич, Запорожское региональное отделение Партии «Единая Россия»
 // @match        https://admin.er.ru/admin/news/create
@@ -13,8 +13,8 @@
 // @grant        GM_log
 // @grant        GM_unload
 // @run-at       document-end
-// @updateURL    https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/edit/main/er.ru-topnews.user.js
-// @downloadURL  https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/edit/main/er.ru-topnews.user.js
+// @updateURL    https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/main/er.ru-topnews.user.js
+// @downloadURL  https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/main/er.ru-topnews.user.js
 // ==/UserScript==
 
 (function() {
@@ -26,7 +26,7 @@
         maxWaitTime: 15000, // Максимальное время ожидания элементов (мс)
         pollInterval: 500, // Интервал проверки появления элементов
         updateCheckInterval: 24 * 60 * 60 * 1000, // Проверять обновления каждые 24 часа
-        githubUrl: 'https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/edit/main/er.ru-topnews.user.js',
+        githubUrl: 'https://api.github.com/repos/nnostrovskiy/web-utils-admin-er/contents/er.ru-topnews.user.js?ref=main',
         lastCheckKey: 'lastUpdateCheck_v2',
         ignoreUpdateKey: 'ignoreUpdateVersion_v2',
         dateOffsetDays: 7 // На сколько дней вперед устанавливать дату
@@ -41,9 +41,6 @@
         },
         error: function(...args) {
             console.error('❌ ТОП-Новости:', ...args);
-            if (CONFIG.debugMode && typeof GM_log === 'function') {
-                GM_log('ТОП-Новости Ошибка: ' + args.join(' '));
-            }
         },
         warn: function(...args) {
             console.warn('⚠️ ТОП-Новости:', ...args);
@@ -146,7 +143,7 @@
             
             GM_xmlhttpRequest({
                 method: 'GET',
-                url: CONFIG.githubUrl + '?t=' + now,
+                url: CONFIG.githubUrl,
                 timeout: 10000,
                 onload: function(response) {
                     GM_setValue(CONFIG.lastCheckKey, now);
@@ -156,21 +153,34 @@
                         return;
                     }
                     
-                    const versionMatch = response.responseText.match(/@version\s+([\d.]+)/);
-                    if (!versionMatch) {
-                        logger.warn('Версия не найдена в ответе');
-                        return;
-                    }
-                    
-                    const latestVersion = versionMatch[1];
-                    const currentVersion = GM_info.script.version;
-                    
-                    logger.log(`Версии: текущая ${currentVersion}, доступная ${latestVersion}`);
-                    
-                    if (compareVersions(latestVersion, currentVersion) > 0) {
-                        showUpdateNotification(currentVersion, latestVersion);
-                    } else {
-                        logger.log('Обновлений не найдено');
+                    try {
+                        const fileData = JSON.parse(response.responseText);
+                        if (!fileData.content) {
+                            logger.warn('Неверный формат ответа GitHub API');
+                            return;
+                        }
+                        
+                        // Декодируем base64 содержимое файла
+                        const fileContent = atob(fileData.content.replace(/\s/g, ''));
+                        const versionMatch = fileContent.match(/@version\s+([\d.]+)/);
+                        
+                        if (!versionMatch) {
+                            logger.warn('Версия не найдена в файле');
+                            return;
+                        }
+                        
+                        const latestVersion = versionMatch[1];
+                        const currentVersion = GM_info.script.version;
+                        
+                        logger.log(`Версии: текущая ${currentVersion}, доступная ${latestVersion}`);
+                        
+                        if (compareVersions(latestVersion, currentVersion) > 0) {
+                            showUpdateNotification(currentVersion, latestVersion);
+                        } else {
+                            logger.log('Обновлений не найдено');
+                        }
+                    } catch (parseError) {
+                        logger.error('Ошибка парсинга ответа GitHub:', parseError);
                     }
                 },
                 onerror: function(error) {
@@ -221,7 +231,7 @@
         );
         
         if (install) {
-            window.open(CONFIG.githubUrl, '_blank');
+            window.open('https://github.com/nnostrovskiy/web-utils-admin-er/blob/main/er.ru-topnews.user.js', '_blank');
         } else {
             GM_setValue(CONFIG.ignoreUpdateKey, latestVersion);
             logger.log('Пользователь проигнорировал обновление:', latestVersion);
@@ -229,10 +239,17 @@
     }
 
     // ===== ОСНОВНАЯ ЛОГИКА УСТАНОВКИ ДАТЫ =====
+    let lastProcessedDate = '';
+
     function calculateEndDate(startDateValue) {
         return safeExecute(() => {
             if (!startDateValue || typeof startDateValue !== 'string') {
                 throw new Error('Неверный формат даты публикации');
+            }
+
+            // Проверяем, не обрабатывали ли мы уже эту дату
+            if (startDateValue === lastProcessedDate) {
+                return null; // Пропускаем повторную обработку
             }
 
             const [datePart, timePart = '00:00'] = startDateValue.split(' ');
@@ -257,6 +274,9 @@
                 `${String(endDate.getDate()).padStart(2, '0')}.` +
                 `${String(endDate.getMonth() + 1).padStart(2, '0')}.` +
                 `${endDate.getFullYear()} ${timePart}`;
+
+            // Сохраняем обработанную дату
+            lastProcessedDate = startDateValue;
 
             logger.log(`Рассчитана дата: ${startDateValue} → ${formattedEndDate}`);
             return formattedEndDate;
@@ -283,8 +303,8 @@
 
             const formattedEndDate = calculateEndDate(startDateValue);
             if (!formattedEndDate) {
-                logger.error('Не удалось рассчитать дату деактивации');
-                return false;
+                // null возвращается когда дата уже обработана
+                return true;
             }
 
             // Устанавливаем значение только если оно изменилось
@@ -323,7 +343,7 @@
             // Оптимизированный обработчик с debounce
             const debouncedDateHandler = debounce(() => {
                 setTimeout(setTopEndDate, 100);
-            }, 300);
+            }, 500);
 
             const events = ['change', 'input', 'blur'];
             events.forEach(eventType => {
@@ -450,9 +470,6 @@
             // Первоначальная установка даты
             setTimeout(setTopEndDate, 1000);
 
-            // Проверка обновлений (с задержкой)
-            setTimeout(checkForUpdates, 10000);
-
         } catch (error) {
             logger.error('Ошибка инициализации:', error);
             
@@ -509,8 +526,6 @@
     // Очистка при выгрузке скрипта
     if (typeof GM_unload === 'function') {
         GM_unload(cleanup);
-    } else if (typeof GM_addUnload === 'function') {
-        GM_addUnload(cleanup);
     }
     
     window.addEventListener('beforeunload', cleanup);
@@ -544,6 +559,9 @@
                 subtree: true
             });
             initialize();
+            
+            // Проверка обновлений (с задержкой после полной загрузки)
+            setTimeout(checkForUpdates, 5000);
         });
     } else {
         logger.log('📄 DOM уже загружен, запуск инициализации...');
@@ -552,6 +570,9 @@
             subtree: true
         });
         initialize();
+        
+        // Проверка обновлений (с задержкой после полной загрузки)
+        setTimeout(checkForUpdates, 5000);
     }
 
     // Принудительная инициализация при полной загрузке страницы
