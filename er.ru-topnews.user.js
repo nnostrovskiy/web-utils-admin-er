@@ -25,7 +25,7 @@
         debugMode: true, // Включить логирование для отладки
         maxWaitTime: 15000, // Максимальное время ожидания элементов (мс)
         pollInterval: 500, // Интервал проверки появления элементов
-        updateCheckInterval: 24 * 60 * 60 * 1000, // Проверять обновления каждые 24 часа
+        updateCheckInterval: 60, // Проверять обновления каждые 24 часа
         githubUrl: 'https://api.github.com/repos/nnostrovskiy/web-utils-admin-er/contents/er.ru-topnews.user.js?ref=main',
         lastCheckKey: 'lastUpdateCheck_v2',
         ignoreUpdateKey: 'ignoreUpdateVersion_v2',
@@ -584,4 +584,3 @@
     });
 
 })();
-
