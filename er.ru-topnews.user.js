@@ -25,7 +25,7 @@
         debugMode: true,
         maxWaitTime: 15000,
         pollInterval: 500,
-        updateCheckInterval: 24 * 60 * 60 * 1000, // 24 часа в миллисекундах
+        updateCheckInterval: 60, // 24 часа в миллисекундах
         githubRawUrl: 'https://raw.githubusercontent.com/nnostrovskiy/web-utils-admin-er/main/er.ru-topnews.user.js',
         lastCheckKey: 'lastUpdateCheck_v3',
         ignoreUpdateKey: 'ignoreUpdateVersion_v3',
@@ -573,4 +573,5 @@
     });
 
 })();
+
 
