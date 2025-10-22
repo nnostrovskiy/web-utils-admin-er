@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Автоматическая установка даты ТОП новости (Оптимизированная)
 // @namespace    https://github.com/nnostrovskiy/web-utils-admin-er
-// @version      1.2.3
+// @version      1.2.4
 // @description  Автоматически устанавливает дату деактивации ТОП новости на неделю вперед. Улучшенная версия с обработкой ошибок и оптимизацией производительности.
 // @author       Островский Николай Николаевич, Запорожское региональное отделение Партии «Единая Россия»
 // @match        https://admin.er.ru/admin/news/create
@@ -25,7 +25,7 @@
         debugMode: true, // Включить логирование для отладки
         maxWaitTime: 15000, // Максимальное время ожидания элементов (мс)
         pollInterval: 500, // Интервал проверки появления элементов
-        updateCheckInterval: 60, // Проверять обновления каждые 24 часа
+        updateCheckInterval: 24 * 60 * 60 * 1000, // Проверять обновления каждые 24 часа
         githubUrl: 'https://api.github.com/repos/nnostrovskiy/web-utils-admin-er/contents/er.ru-topnews.user.js?ref=main',
         lastCheckKey: 'lastUpdateCheck_v2',
         ignoreUpdateKey: 'ignoreUpdateVersion_v2',
@@ -584,4 +584,5 @@
     });
 
 })();
+
 
